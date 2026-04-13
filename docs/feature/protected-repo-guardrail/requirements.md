@@ -3,6 +3,7 @@
 > 日期：2026-04-13
 > 状态：Draft
 > 调研参考：
+>
 > - 根目录 `guide.md` 中的 DeepWiki 链接（背景参考）：<https://deepwiki.com/search/-claude-code-claude-agent-sdk_3de3a49b-6c2a-4893-8cd4-ccb2c2d6e89e?mode=fast>
 > - `docs/tech/acp-detector.md`（当前 Claude ACP 集成链路）
 > - Claude Code Hooks：<https://code.claude.com/docs/en/hooks>

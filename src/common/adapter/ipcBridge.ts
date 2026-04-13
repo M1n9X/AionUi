@@ -962,6 +962,8 @@ export interface ICreateConversationParams {
     extraSkillPaths?: string[];
     /** Builtin skill names to exclude from auto-injection (e.g. 'cron' for cron-spawned conversations) */
     excludeBuiltinSkills?: string[];
+    /** Protected repo black-box guardrail policy */
+    protectedRepoPolicy?: import('@/common/chat/guardrails').ProtectedRepoPolicy;
     /** Team ownership — conversations with teamId are hidden from the sidebar */
     teamId?: string;
   };

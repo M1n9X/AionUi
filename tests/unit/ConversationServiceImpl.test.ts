@@ -435,6 +435,46 @@ describe('ConversationServiceImpl.createConversation', () => {
     });
   });
 
+  it('preserves protectedRepoPolicy in extra fields', async () => {
+    const repo = makeRepo();
+    const svc = new ConversationServiceImpl(repo);
+    const result = await svc.createConversation({
+      type: 'acp',
+      model: { provider: 'anthropic', model: 'claude-3-5-sonnet' } as any,
+      extra: {
+        workspace: '/workspace',
+        backend: 'claude',
+        protectedRepoPolicy: {
+          enabled: true,
+          backend: 'claude',
+          repoId: 'repo',
+          repoRoot: '/tmp/repo',
+        },
+      },
+    });
+
+    expect(repo.createConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extra: expect.objectContaining({
+          protectedRepoPolicy: expect.objectContaining({
+            enabled: true,
+            backend: 'claude',
+            repoId: 'repo',
+            repoRoot: '/tmp/repo',
+          }),
+        }),
+      })
+    );
+    expect(result.extra).toMatchObject({
+      protectedRepoPolicy: {
+        enabled: true,
+        backend: 'claude',
+        repoId: 'repo',
+        repoRoot: '/tmp/repo',
+      },
+    });
+  });
+
   it('does not overwrite factory-produced extra fields with params extra', async () => {
     const { createGeminiAgent } = await import('../../src/process/utils/initAgent');
     vi.mocked(createGeminiAgent).mockResolvedValueOnce({

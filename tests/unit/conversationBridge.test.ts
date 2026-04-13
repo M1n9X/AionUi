@@ -116,13 +116,23 @@ function makeConversation(id: string, workspace = '/ws'): TChatConversation {
 describe('conversationBridge', () => {
   let service: IConversationService;
   let taskManager: IWorkerTaskManager;
+  const originalProtectedRepoEnv = process.env.AIONUI_PROTECTED_REPO_GUARDRAIL;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.AIONUI_PROTECTED_REPO_GUARDRAIL;
     // Re-register providers by re-initializing the bridge
     service = makeService();
     taskManager = makeTaskManager();
     initConversationBridge(service, taskManager);
+  });
+
+  afterEach(() => {
+    if (originalProtectedRepoEnv === undefined) {
+      delete process.env.AIONUI_PROTECTED_REPO_GUARDRAIL;
+    } else {
+      process.env.AIONUI_PROTECTED_REPO_GUARDRAIL = originalProtectedRepoEnv;
+    }
   });
 
   describe('create', () => {
@@ -151,6 +161,72 @@ describe('conversationBridge', () => {
 
       expect(result).toBeUndefined();
       expect(service.createConversation).not.toHaveBeenCalled();
+    });
+
+    it('passes protectedRepoPolicy through to the conversation service', async () => {
+      const handler = handlers['create'];
+      vi.mocked(service.createConversation).mockResolvedValue(makeConversation('created-1'));
+
+      await handler({
+        type: 'acp',
+        name: 'protected conversation',
+        model: { id: 'm1' },
+        extra: {
+          workspace: '/ws',
+          backend: 'claude',
+          protectedRepoPolicy: {
+            enabled: true,
+            backend: 'claude',
+            repoId: 'repo',
+            repoRoot: '/tmp/repo',
+          },
+        },
+      } as unknown);
+
+      expect(service.createConversation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'acp',
+          source: 'aionui',
+          extra: expect.objectContaining({
+            backend: 'claude',
+            protectedRepoPolicy: expect.objectContaining({
+              enabled: true,
+              backend: 'claude',
+              repoId: 'repo',
+              repoRoot: '/tmp/repo',
+            }),
+          }),
+        })
+      );
+    });
+
+    it('auto-applies protectedRepoPolicy for claude ACP conversations when test mode is enabled', async () => {
+      process.env.AIONUI_PROTECTED_REPO_GUARDRAIL = '1';
+      vi.mocked(service.createConversation).mockResolvedValue(makeConversation('created-2'));
+
+      const handler = handlers['create'];
+      await handler({
+        type: 'acp',
+        name: 'protected conversation',
+        model: { id: 'm1' },
+        extra: {
+          workspace: '/tmp/protected-repo',
+          backend: 'claude',
+        },
+      } as unknown);
+
+      expect(service.createConversation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          extra: expect.objectContaining({
+            protectedRepoPolicy: expect.objectContaining({
+              enabled: true,
+              backend: 'claude',
+              repoId: 'protected-repo',
+              repoRoot: '/tmp/protected-repo',
+            }),
+          }),
+        })
+      );
     });
   });
 

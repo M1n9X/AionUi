@@ -32,6 +32,7 @@ export interface CreateConversationParams {
     excludeBuiltinSkills?: string[];
     presetAssistantId?: string;
     sessionMode?: string;
+    protectedRepoPolicy?: import('@/common/chat/guardrails').ProtectedRepoPolicy;
     isHealthCheck?: boolean;
     [key: string]: unknown;
   };

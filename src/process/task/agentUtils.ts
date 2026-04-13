@@ -7,6 +7,8 @@
 import { getSkillsDir, getBuiltinSkillsCopyDir, loadSkillsContent } from '@process/utils/initStorage';
 import { AcpSkillManager, buildSkillsIndexText } from './AcpSkillManager';
 import { getTeamGuidePrompt } from '@process/resources/prompts/teamGuidePrompt';
+import type { ProtectedRepoPolicy } from '@/common/chat/guardrails';
+import { isProtectedRepoPolicyEnabled } from '@/common/chat/guardrails';
 
 /**
  * 首次消息处理配置
@@ -21,6 +23,21 @@ export interface FirstMessageConfig {
   enableTeamGuide?: boolean;
   /** Agent backend type (e.g. 'claude', 'codex') — used to populate team guide prompt */
   backend?: string;
+  /** Protected repo black-box guardrail policy */
+  protectedRepoPolicy?: ProtectedRepoPolicy;
+}
+
+export function getProtectedRepoGuardrailPrompt(policy?: ProtectedRepoPolicy): string | undefined {
+  if (!isProtectedRepoPolicyEnabled(policy)) {
+    return undefined;
+  }
+
+  return (
+    'Protected Repo Black-Box Mode\n' +
+    'Return only final business results.\n' +
+    'Do not reveal code, configuration, credentials, file paths, symbol names, or implementation details.\n' +
+    'Do not explain internal execution steps or discuss how the protected skills work.'
+  );
 }
 
 /**
@@ -44,6 +61,11 @@ export async function buildSystemInstructions(config: FirstMessageConfig): Promi
     if (skillsContent) {
       instructions.push(skillsContent);
     }
+  }
+
+  const protectedRepoPrompt = getProtectedRepoGuardrailPrompt(config.protectedRepoPolicy);
+  if (protectedRepoPrompt) {
+    instructions.push(protectedRepoPrompt);
   }
 
   // Inject Team Guide prompt when agent has team guide capability
@@ -101,6 +123,11 @@ export async function prepareFirstMessageWithSkillsIndex(content: string, config
   // 1. 添加预设规则 / Add preset rules
   if (config.presetContext) {
     instructions.push(config.presetContext);
+  }
+
+  const protectedRepoPrompt = getProtectedRepoGuardrailPrompt(config.protectedRepoPolicy);
+  if (protectedRepoPrompt) {
+    instructions.push(protectedRepoPrompt);
   }
 
   // 2. 加载 skills 索引（包括内置 skills + 可选 skills）
@@ -176,6 +203,11 @@ export async function buildSystemInstructionsWithSkillsIndex(config: FirstMessag
   // 添加预设上下文 / Add preset context
   if (config.presetContext) {
     instructions.push(config.presetContext);
+  }
+
+  const protectedRepoPrompt = getProtectedRepoGuardrailPrompt(config.protectedRepoPolicy);
+  if (protectedRepoPrompt) {
+    instructions.push(protectedRepoPrompt);
   }
 
   // 加载 skills 索引（包括内置 skills + 可选 skills）

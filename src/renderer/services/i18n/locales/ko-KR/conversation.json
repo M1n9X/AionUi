@@ -294,5 +294,14 @@
   "thinking": {
     "complete": "사고 완료",
     "label": "생각 중..."
+  },
+  "protectedRepo": {
+    "badge": "Protected Repo",
+    "badgeTooltip": "This conversation is running in protected repo black-box mode.",
+    "refusal": "Unable to process source code or credentials related requests.",
+    "hiddenImplementation": "Result generated. Source code, configuration, and implementation details are hidden.",
+    "hiddenCredential": "Sensitive credentials were removed from the result.",
+    "failure": "Execution failed. Please retry or provide additional input.",
+    "processing": "Processing protected task..."
   }
 }
