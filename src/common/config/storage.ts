@@ -285,6 +285,8 @@ export type TChatConversation =
           cachedConfigOptions?: import('@/common/types/acpTypes').AcpSessionConfigOption[];
           /** Pending config option selections from Guid page / Guid 页面待应用的配置选项 */
           pendingConfigOptions?: Record<string, string>;
+          /** Protected repo black-box guardrail policy */
+          protectedRepoPolicy?: import('@/common/chat/guardrails').ProtectedRepoPolicy;
           /** Explicit marker for temporary health-check conversations */
           isHealthCheck?: boolean;
           /** Cron job ID that spawned this conversation */

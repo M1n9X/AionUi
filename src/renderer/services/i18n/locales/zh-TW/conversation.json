@@ -294,5 +294,14 @@
   "thinking": {
     "complete": "思考完成",
     "label": "思考中..."
+  },
+  "protectedRepo": {
+    "badge": "受保護 Repo",
+    "badgeTooltip": "目前會話已啟用受保護 Repo 黑盒模式。",
+    "refusal": "無法處理 source code 或 credentials 相關請求。",
+    "hiddenImplementation": "結果已生成，但原始碼、設定與實作細節已隱藏。",
+    "hiddenCredential": "結果中的敏感憑據已被移除。",
+    "failure": "執行失敗，請重試或補充更多輸入。",
+    "processing": "正在處理受保護任務..."
   }
 }

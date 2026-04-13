@@ -117,6 +117,9 @@ vi.mock('@process/utils/initAgent', () => ({
 vi.mock('@process/task/agentUtils', () => ({
   prepareFirstMessageWithSkillsIndex: mockPrepareFirstMessage,
   buildSystemInstructions: vi.fn(async () => undefined),
+  getProtectedRepoGuardrailPrompt: vi.fn((policy?: { enabled?: boolean }) =>
+    policy?.enabled ? 'Protected Repo Black-Box Mode\nReturn only final business results' : undefined
+  ),
 }));
 
 // Mock AcpAgent class
@@ -139,6 +142,7 @@ function createManager(
     customWorkspace?: boolean;
     presetContext?: string;
     enabledSkills?: string[];
+    protectedRepoPolicy?: Record<string, unknown>;
   } = {}
 ) {
   const data = {
@@ -148,6 +152,7 @@ function createManager(
     customWorkspace: overrides.customWorkspace,
     presetContext: overrides.presetContext,
     enabledSkills: overrides.enabledSkills,
+    protectedRepoPolicy: overrides.protectedRepoPolicy,
   };
   // @ts-expect-error - backend type narrowing
   const manager = new AcpAgentManager(data);
@@ -245,6 +250,25 @@ describe('AcpAgentManager — first-message skill injection', () => {
     expect(sentContent).toContain('Team Mode');
     expect(sentContent).toContain('[User Request]');
     expect(sentContent).toContain('Test message');
+  });
+
+  it('injects protected repo black-box rules on the first message', async () => {
+    const manager = createManager({
+      backend: 'claude',
+      customWorkspace: false,
+      protectedRepoPolicy: {
+        enabled: true,
+        backend: 'claude',
+        repoId: 'repo',
+        repoRoot: '/tmp/repo',
+      },
+    });
+
+    await sendFirstMessage(manager, 'Test message');
+
+    const sentContent = mockAgentSendMessage.mock.calls[0][0].content as string;
+    expect(sentContent).toContain('Protected Repo Black-Box Mode');
+    expect(sentContent).toContain('Return only final business results');
   });
 
   it('injects team guide for gemini backend (now in TEAM_SUPPORTED_BACKENDS)', async () => {

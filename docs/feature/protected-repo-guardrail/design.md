@@ -2,12 +2,14 @@
 
 > 基于 [需求文档](./requirements.md) 编写
 > 关键参考：
+>
 > - Claude Code Hooks：<https://code.claude.com/docs/en/hooks>
 > - Claude Code Settings：<https://code.claude.com/docs/en/settings>
 > - Claude Agent SDK：<https://code.claude.com/docs/en/agent-sdk/overview>
 > - Anthropic Mitigate Jailbreaks：<https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/mitigate-jailbreaks>
 > - Anthropic Reduce Prompt Leak：<https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/reduce-prompt-leak>
 > - 本仓库链路分析：`docs/tech/acp-detector.md`
+> - 调参与修改入口：[`tuning-guide.md`](./tuning-guide.md)
 
 ## 1. 设计结论
 

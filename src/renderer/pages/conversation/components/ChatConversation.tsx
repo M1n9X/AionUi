@@ -11,7 +11,7 @@ import addChatIcon from '@/renderer/assets/icons/add-chat.svg';
 import { CronJobManager } from '@/renderer/pages/cron';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { iconColors } from '@/renderer/styles/colors';
-import { Button, Dropdown, Menu, Tooltip, Typography } from '@arco-design/web-react';
+import { Button, Dropdown, Menu, Tag, Tooltip, Typography } from '@arco-design/web-react';
 import { History } from '@icon-park/react';
 import React, { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -33,6 +33,7 @@ import AionrsModelSelector from '../platforms/aionrs/AionrsModelSelector';
 import { useAionrsModelSelection } from '../platforms/aionrs/useAionrsModelSelection';
 import { usePreviewContext } from '../Preview';
 import StarOfficeMonitorCard from '../platforms/openclaw/StarOfficeMonitorCard.tsx';
+import { isProtectedRepoPolicyEnabled } from '@/common/chat/guardrails';
 // import SkillRuleGenerator from './components/SkillRuleGenerator'; // Temporarily hidden
 
 const _AssociatedConversation: React.FC<{ conversation_id: string }> = ({ conversation_id }) => {
@@ -243,6 +244,13 @@ const ChatConversation: React.FC<{
   const { t } = useTranslation();
   const { openPreview } = usePreviewContext();
   const workspaceEnabled = Boolean(conversation?.extra?.workspace);
+  const protectedRepoPolicy = (
+    conversation?.type === 'acp'
+      ? (conversation.extra as { protectedRepoPolicy?: import('@/common/chat/guardrails').ProtectedRepoPolicy })
+          ?.protectedRepoPolicy
+      : undefined
+  );
+  const isProtectedRepoConversation = isProtectedRepoPolicyEnabled(protectedRepoPolicy);
 
   const isGeminiConversation = conversation?.type === 'gemini';
   const isAionrsConversation = conversation?.type === 'aionrs';
@@ -399,6 +407,17 @@ const ChatConversation: React.FC<{
 
   const headerExtraNode = (
     <div className='flex items-center gap-8px'>
+      {isProtectedRepoConversation && (
+        <Tooltip
+          content={t('conversation.protectedRepo.badgeTooltip', {
+            defaultValue: 'This conversation is running in protected repo black-box mode.',
+          })}
+        >
+          <Tag size='small' color='gold'>
+            {t('conversation.protectedRepo.badge', { defaultValue: 'Protected Repo' })}
+          </Tag>
+        </Tooltip>
+      )}
       {conversation?.type === 'openclaw-gateway' && (
         <div className='shrink-0'>
           <StarOfficeMonitorCard

@@ -39,10 +39,13 @@ import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher'
 import { extractAndStripThinkTags } from './ThinkTagDetector';
 import type { AgentKillReason } from './IAgentManager';
 import { hasNativeSkillSupport } from '@/common/types/acpTypes';
-import { prepareFirstMessageWithSkillsIndex } from '@process/task/agentUtils';
+import { getProtectedRepoGuardrailPrompt, prepareFirstMessageWithSkillsIndex } from '@process/task/agentUtils';
 import { shouldInjectTeamGuideMcp } from '@process/resources/prompts/teamGuidePrompt';
 import { extractTextFromMessage, processCronInMessage } from './MessageMiddleware';
 import { ConversationTurnCompletionService } from './ConversationTurnCompletionService';
+import type { ProtectedRepoPolicy } from '@/common/chat/guardrails';
+import { ProtectedTurnBuffer } from '@process/bridge/services/guardrails/ProtectedTurnBuffer';
+import { ProtectedRepoGuardrailService } from '@process/bridge/services/guardrails/ProtectedRepoGuardrailService';
 
 interface AcpAgentManagerData {
   workspace?: string;
@@ -69,6 +72,8 @@ interface AcpAgentManagerData {
   sandboxMode?: CodexSandboxMode;
   /** Pending config option selections from Guid page (applied after session creation) */
   pendingConfigOptions?: Record<string, string>;
+  /** Protected repo black-box guardrail policy */
+  protectedRepoPolicy?: ProtectedRepoPolicy;
 }
 
 type BufferedStreamTextMessage = {
@@ -110,6 +115,8 @@ class AcpAgentManager extends BaseAgentManager<AcpAgentManagerData, AcpPermissio
   private missingFinishFallbackTimer: ReturnType<typeof setTimeout> | null = null;
   private missingFinishFallbackTurnId: number | null = null;
   private readonly missingFinishFallbackDelayMs = 15000;
+  private readonly protectedTurnBuffer = new ProtectedTurnBuffer();
+  private readonly protectedRepoGuardrailService = new ProtectedRepoGuardrailService();
 
   constructor(data: AcpAgentManagerData) {
     super('acp', data, new IpcAgentEventEmitter());
@@ -294,6 +301,41 @@ class AcpAgentManager extends BaseAgentManager<AcpAgentManagerData, AcpPermissio
       this.markActiveTurnFinished();
     }
     this.clearMissingFinishFallback();
+
+    if (this.isProtectedRepoConversation()) {
+      const snapshot = this.protectedTurnBuffer.snapshot();
+      const pendingError = snapshot.pendingError;
+      const content = snapshot.content;
+      this.protectedTurnBuffer.reset();
+      this.clearBusyState();
+
+      if (this.thinkingMsgId) {
+        this.emitThinkingMessage('', 'done');
+        this.thinkingMsgId = null;
+        this.thinkingStartTime = null;
+        this.thinkingContent = '';
+      }
+
+      skillSuggestWatcher.onFinish(this.conversation_id);
+
+      if (content) {
+        const sanitized = this.protectedRepoGuardrailService.sanitizeFinalContent(
+          content,
+          this.getProtectedRepoPolicy()!
+        );
+        this.emitProtectedContent(sanitized.sanitizedText, backend);
+      } else if (pendingError) {
+        const sanitizedError = this.protectedRepoGuardrailService.sanitizeError(
+          pendingError,
+          this.getProtectedRepoPolicy()!
+        );
+        this.emitProtectedContent(sanitizedError.sanitizedText, backend);
+      }
+
+      this.emitProtectedFinish(message, backend);
+      return;
+    }
+
     this.flushBufferedStreamTextMessages();
 
     cronBusyGuard.setProcessing(this.conversation_id, false);
@@ -627,6 +669,33 @@ ${collectedResponses.join('\n')}`;
     // Handle preview_open event (chrome-devtools navigation interception)
     if (handlePreviewOpenEvent(message)) return;
 
+    if (this.isProtectedRepoConversation()) {
+      switch (message.type) {
+        case 'start':
+        case 'agent_status':
+        case 'request_trace':
+        case 'acp_model_info':
+        case 'acp_context_usage':
+          return;
+        case 'content':
+          if (typeof message.data === 'string') {
+            this.protectedTurnBuffer.appendContentChunk(message.data);
+          }
+          return;
+        case 'thought':
+          this.protectedTurnBuffer.markHiddenThought();
+          return;
+        case 'plan':
+          this.protectedTurnBuffer.markHiddenPlan();
+          return;
+        case 'acp_tool_call':
+          this.protectedTurnBuffer.markHiddenToolCall();
+          return;
+        default:
+          break;
+      }
+    }
+
     // Mark as finished when content is output (visible to user)
     const contentTypes = ['content', 'agent_status', 'acp_tool_call', 'plan'];
     if (contentTypes.includes(message.type)) {
@@ -814,6 +883,11 @@ ${collectedResponses.join('\n')}`;
       return;
     }
 
+    if (this.isProtectedRepoConversation() && v.type === 'error') {
+      this.protectedTurnBuffer.setPendingError(String(v.data ?? ''));
+      return;
+    }
+
     ipcBridge.acpConversation.responseStream.emit(v);
 
     channelEventBus.emitAgentMessage(this.conversation_id, {
@@ -988,6 +1062,28 @@ ${collectedResponses.join('\n')}`;
       await this.initAgent(this.options);
 
       if (data.msg_id && data.content) {
+        if (this.isProtectedRepoConversation()) {
+          const precheck = this.protectedRepoGuardrailService.runPrecheck(data.content, this.getProtectedRepoPolicy()!);
+          if (precheck.action === 'block') {
+            this.emitProtectedContent(
+              this.protectedRepoGuardrailService.buildRefusalMessage(this.getProtectedRepoPolicy()!),
+              this.options.backend
+            );
+            this.clearBusyState();
+            this.emitProtectedFinish(
+              {
+                type: 'finish',
+                conversation_id: this.conversation_id,
+                msg_id: data.msg_id,
+                data: null,
+              },
+              this.options.backend
+            );
+            return { success: true };
+          }
+          this.protectedTurnBuffer.startTurn();
+        }
+
         let contentToSend = data.content;
         if (contentToSend.includes(AIONUI_FILES_MARKER)) {
           contentToSend = contentToSend.split(AIONUI_FILES_MARKER)[0].trimEnd();
@@ -1007,6 +1103,8 @@ ${collectedResponses.join('\n')}`;
             // Native skill discovery via workspace symlinks — inject preset rules + team guide
             const parts: string[] = [];
             if (this.options.presetContext) parts.push(this.options.presetContext);
+            const protectedRepoPrompt = getProtectedRepoGuardrailPrompt(this.getProtectedRepoPolicy());
+            if (protectedRepoPrompt) parts.push(protectedRepoPrompt);
             if (!isInTeam && shouldInjectTeamGuideMcp(this.options.backend)) {
               const { getTeamGuidePrompt } = await import('@process/resources/prompts/teamGuidePrompt');
               parts.push(getTeamGuidePrompt(this.options.backend));
@@ -1021,6 +1119,7 @@ ${collectedResponses.join('\n')}`;
               enabledSkills: this.options.enabledSkills,
               enableTeamGuide: !isInTeam && shouldInjectTeamGuideMcp(this.options.backend),
               backend: this.options.backend,
+              protectedRepoPolicy: this.getProtectedRepoPolicy(),
             });
           }
         }
@@ -1447,6 +1546,52 @@ ${collectedResponses.join('\n')}`;
   private clearBusyState(): void {
     cronBusyGuard.setProcessing(this.conversation_id, false);
     this.status = 'finished';
+  }
+
+  private getProtectedRepoPolicy(): ProtectedRepoPolicy | undefined {
+    return this.options.protectedRepoPolicy;
+  }
+
+  private isProtectedRepoConversation(): boolean {
+    return this.protectedRepoGuardrailService.isProtectedConversation(this.getProtectedRepoPolicy());
+  }
+
+  private emitProtectedContent(content: string, backend: AcpBackend): void {
+    const messageId = uuid();
+    const protectedMessage: IResponseMessage = {
+      type: 'content',
+      conversation_id: this.conversation_id,
+      msg_id: messageId,
+      data: content,
+    };
+
+    const tMessage = transformMessage(protectedMessage);
+    if (tMessage) {
+      addOrUpdateMessage(this.conversation_id, tMessage, backend);
+    }
+
+    ipcBridge.acpConversation.responseStream.emit(protectedMessage);
+    channelEventBus.emitAgentMessage(this.conversation_id, protectedMessage);
+  }
+
+  private emitProtectedFinish(message: IResponseMessage, backend: AcpBackend): void {
+    const finishMessage: IResponseMessage = {
+      ...message,
+      type: 'finish',
+      conversation_id: this.conversation_id,
+    };
+
+    ipcBridge.acpConversation.responseStream.emit(finishMessage);
+    teamEventBus.emit('responseStream', finishMessage);
+    channelEventBus.emitAgentMessage(this.conversation_id, finishMessage);
+
+    void ConversationTurnCompletionService.getInstance().notifyPotentialCompletion(this.conversation_id, {
+      status: this.status ?? 'finished',
+      workspace: this.workspace,
+      backend,
+      pendingConfirmations: this.getConfirmations().length,
+      modelId: this.persistedModelId ?? this.agent?.getModelInfo?.()?.currentModelId ?? undefined,
+    });
   }
 
   private async saveContextUsage(usage: { used: number; size: number }): Promise<void> {

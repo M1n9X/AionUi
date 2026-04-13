@@ -50,6 +50,41 @@ const VALID_CONVERSATION_TYPES = new Set<TChatConversation['type']>([
   'aionrs',
 ]);
 
+function shouldAutoApplyProtectedRepoGuardrail(): boolean {
+  const flag = process.env.AIONUI_PROTECTED_REPO_GUARDRAIL?.trim().toLowerCase();
+  return flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on';
+}
+
+function withAutoProtectedRepoPolicy(params: CreateConversationParams): CreateConversationParams {
+  if (!shouldAutoApplyProtectedRepoGuardrail()) {
+    return params;
+  }
+
+  if (params.type !== 'acp' || params.extra.backend !== 'claude') {
+    return params;
+  }
+
+  if (params.extra.protectedRepoPolicy || !params.extra.workspace) {
+    return params;
+  }
+
+  const repoRoot = params.extra.workspace;
+  const repoId = path.basename(repoRoot) || 'protected-repo';
+
+  return {
+    ...params,
+    extra: {
+      ...params.extra,
+      protectedRepoPolicy: {
+        enabled: true,
+        backend: 'claude',
+        repoId,
+        repoRoot,
+      },
+    },
+  };
+}
+
 export function initConversationBridge(
   conversationService: IConversationService,
   workerTaskManager: IWorkerTaskManager,
@@ -130,10 +165,11 @@ export function initConversationBridge(
     }
     try {
       // Codex now runs through AcpAgentManager — remap type to 'acp' with backend hint
-      const createParams =
+      const baseParams =
         params.type === 'codex'
           ? { ...params, type: 'acp' as const, extra: { ...params.extra, backend: 'codex' as const } }
           : params;
+      const createParams = withAutoProtectedRepoPolicy(baseParams as CreateConversationParams);
       const conversation = await conversationService.createConversation({
         ...createParams,
         source: 'aionui',
